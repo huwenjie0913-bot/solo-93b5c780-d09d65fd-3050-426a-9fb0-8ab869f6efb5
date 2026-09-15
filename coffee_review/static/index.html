@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>手冲咖啡复盘台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%98%95%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar no-print">
+  <div class="brand">
+    <span class="brand-mark">☕</span>
+    <div>
+      <h1>手冲咖啡复盘台</h1>
+      <p class="subtitle">拖拽闷蒸与分段注水节点，复盘流速、停顿与风味问题</p>
+    </div>
+  </div>
+  <div class="top-actions">
+    <select id="brewSelect" title="选择冲煮记录"></select>
+    <button id="newBrewBtn" class="btn" type="button">＋ 新冲煮</button>
+    <button id="resetSamplesBtn" class="btn ghost" type="button" title="清空当前库并重新载入示例">恢复示例</button>
+    <button id="saveBtn" class="btn primary" type="button">保存修改</button>
+    <button id="printBtn" class="btn dark" type="button">🖨 打印单页</button>
+  </div>
+</header>
+
+<!-- 打印专用页眉 -->
+<div class="print-header print-only">
+  <h1>手冲冲煮复盘单</h1>
+  <div class="print-meta">
+    <span id="printName"></span>
+    <span id="printVersion"></span>
+    <span id="printDate"></span>
+  </div>
+</div>
+
+<div id="dirtyBadge" class="dirty-badge no-print" hidden>● 有未保存的修改</div>
+
+<main class="layout">
+  <!-- ============ 左列：参数 + 曲线 + 阶段表 ============ -->
+  <section class="col-main">
+
+    <!-- 顶部实时指标条 -->
+    <div class="stat-strip card" id="statStrip">
+      <div class="stat"><span class="stat-k">总时长</span><span class="stat-v" id="statTime">–</span></div>
+      <div class="stat"><span class="stat-k">累计注水</span><span class="stat-v" id="statWater">–</span></div>
+      <div class="stat"><span class="stat-k">实际粉水比</span><span class="stat-v" id="statRatio">–</span></div>
+      <div class="stat"><span class="stat-k">闷蒸</span><span class="stat-v" id="statBloom">–</span></div>
+      <div class="stat"><span class="stat-k">中位流速</span><span class="stat-v" id="statFlow">–</span></div>
+      <div class="stat"><span class="stat-k">注水/停顿段</span><span class="stat-v" id="statCounts">–</span></div>
+    </div>
+
+    <!-- 参数表单 -->
+    <div class="card">
+      <div class="card-title">
+        <h2>冲煮参数</h2>
+      </div>
+      <div class="param-grid">
+        <label class="field wide">
+          <span>方案 / 备注名</span>
+          <input type="text" id="fName" placeholder="例如：耶加雪菲 V3">
+        </label>
+        <label class="field">
+          <span>日期</span>
+          <input type="date" id="fDate">
+        </label>
+        <label class="field">
+          <span>粉量 (g)</span>
+          <input type="number" id="fDose" min="0" step="0.5">
+        </label>
+        <label class="field">
+          <span>水温 (℃)</span>
+          <input type="number" id="fTemp" min="0" max="100" step="0.5">
+        </label>
+        <label class="field">
+          <span>研磨刻度</span>
+          <input type="number" id="fGrind" step="0.5" title="数值越大越粗">
+          <small class="hint">数值越大越粗，如 22</small>
+        </label>
+        <label class="field">
+          <span>目标粉水比 (1:)</span>
+          <input type="number" id="fTargetRatio" min="0" step="0.5">
+        </label>
+        <label class="field">
+          <span>登记总水量 (g)</span>
+          <input type="number" id="fWater" min="0" step="1">
+          <small class="hint">与曲线末点不一致会提示</small>
+        </label>
+      </div>
+
+      <div class="flavor-row">
+        <span class="flavor-label">这杯喝起来：</span>
+        <div class="flavor-checks" id="flavorChecks"><!-- JS 注入复选框 --></div>
+      </div>
+    </div>
+
+    <!-- 曲线图 -->
+    <div class="card">
+      <div class="card-title">
+        <h2>累计注水曲线</h2>
+        <div class="legend">
+          <span class="lg"><i class="lg-line pour"></i>注水</span>
+          <span class="lg"><i class="lg-line pause"></i>停顿</span>
+          <span class="lg"><i class="lg-bloom"></i>闷蒸区</span>
+          <span class="lg"><i class="lg-node"></i>节点</span>
+          <span class="lg overlay-legend" id="overlayLegend" hidden><i class="lg-line overlay"></i>对照曲线</span>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <svg id="chart" viewBox="0 0 760 400" preserveAspectRatio="xMidYMid meet" role="img"
+             aria-label="累计注水曲线，可拖拽节点"></svg>
+        <div id="chartTip" class="chart-tip" hidden></div>
+      </div>
+      <div class="chart-tools no-print">
+        <div class="node-editor">
+          <span>选中节点：</span>
+          <label>时间 <input type="number" id="selT" min="0" step="1"> s</label>
+          <label>水量 <input type="number" id="selW" min="0" step="1"> g</label>
+          <button class="btn mini danger" id="delNodeBtn" type="button">删除节点</button>
+          <span class="muted" id="selInfo"></span>
+        </div>
+        <div class="chart-hint muted">
+          提示：拖拽圆点调整节点 · 双击曲线空白处插入节点 · 右键节点删除（首末节点除外）· ↑↓←→ 微调选中节点
+        </div>
+      </div>
+    </div>
+
+    <!-- 阶段表 -->
+    <div class="card">
+      <div class="card-title">
+        <h2>分段明细</h2>
+        <span class="muted small" id="stageCount"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="stage-table" id="stageTable">
+          <thead>
+            <tr>
+              <th>#</th><th>类型</th><th>时段 (s)</th><th>时长</th>
+              <th>起 (g)</th><th>止 (g)</th><th>加水 (g)</th><th>流速 (g/s)</th><th>诊断</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 现场备注 -->
+    <div class="card">
+      <div class="card-title"><h2>现场备注</h2></div>
+      <textarea id="fNotes" rows="4" placeholder="记录手法、豆子、滤杯、风味感受、下一次想试的调整……"></textarea>
+    </div>
+  </section>
+
+  <!-- ============ 右列：诊断 / 风味归因 / 对照 / 版本 ============ -->
+  <aside class="col-side">
+
+    <div class="card">
+      <div class="card-title">
+        <h2>规则命中</h2>
+        <span class="badge-count" id="ruleCount">0</span>
+      </div>
+      <ul class="rule-list" id="ruleList"></ul>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        <h2>风味 → 可疑阶段</h2>
+      </div>
+      <div id="flavorMap" class="flavor-map"></div>
+    </div>
+
+    <div class="card no-print-hide" id="compareCard">
+      <div class="card-title"><h2>曲线叠加与锁定变量</h2></div>
+      <div class="compare-row">
+        <label class="field block">
+          <span>对照冲煮</span>
+          <select id="compareSelect">
+            <option value="">（不叠加）</option>
+          </select>
+        </label>
+        <button class="btn mini" id="clearCompareBtn" type="button">清除叠加</button>
+      </div>
+      <div class="compare-diff" id="compareDiff"></div>
+      <div class="lock-box">
+        <span class="flavor-label">锁定变量（下一杯不动）：</span>
+        <div class="lock-checks" id="lockChecks"></div>
+      </div>
+      <button class="btn primary block-btn" id="suggestBtn" type="button">生成下一次调整建议</button>
+      <div id="suggestBox" class="suggest-box print-only-block"></div>
+    </div>
+
+    <div class="card no-print-hide" id="versionsCard">
+      <div class="card-title">
+        <h2>方案版本</h2>
+        <button class="btn mini" id="newVersionBtn" type="button">存为新版本</button>
+      </div>
+      <ul class="version-list" id="versionList"></ul>
+    </div>
+
+  </aside>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -321,6 +321,91 @@ textarea { width: 100%; resize: vertical; }
   text-decoration: underline dotted; }
 .sg-note { font-size: 11.5px; color: var(--ink-soft); margin-top: 6px; }
 
+/* ============ 冲煮水配方 ============ */
+#waterCard { scroll-margin-top: 90px; }
+
+.water-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.water-toolbar .wf-name { flex: 1; min-width: 180px; }
+.water-toolbar select { max-width: 260px; font-size: 12.5px; }
+.water-toolbar .btn.mini { white-space: nowrap; }
+.water-toolbar .btn.mini.linked { background: var(--info-bg); border-color: #9cc2cf; color: #2b5d6d; font-weight: 600; }
+
+.water-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 10px; }
+.water-box {
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px 10px;
+  margin: 0; background: #faf6f0; display: flex; flex-direction: column; gap: 5px;
+}
+.water-box.target { background: #f7f1f9; border-color: #e3d6ea; }
+.water-box.limits { background: #f4f7f4; border-color: #d9e4d8; }
+.water-box legend { font-size: 12px; font-weight: 700; color: var(--brand-dark); padding: 0 5px; }
+.water-box label { display: flex; justify-content: space-between; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--ink-soft); }
+.water-box label.water-volume { flex-direction: column; align-items: stretch; gap: 3px; }
+.water-box input { width: 110px; padding: 4px 7px; font-size: 12.5px; }
+.water-volume input { width: 100%; }
+.water-box .hint { margin-top: 1px; }
+
+/* 储备液表 */
+.stock-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.stock-table th { color: var(--ink-soft); font-weight: 600; background: #faf5ee;
+  padding: 5px 8px; text-align: left; white-space: nowrap; }
+.stock-table td { padding: 4px 8px; border-bottom: 1px solid #efe7dc; vertical-align: middle; }
+.stock-table tr.disabled td { opacity: 0.45; }
+.stock-table tr.dose-warn { background: var(--warn-bg); }
+.stock-table input[type="number"] { width: 96px; padding: 3px 7px; font-size: 12px; }
+.stock-table .dose-ml { font-weight: 700; color: var(--brand-dark); font-variant-numeric: tabular-nums; }
+.stock-table .dose-ml.warn { color: var(--warn); }
+.stock-table .salt-ions { font-size: 11px; color: var(--ink-soft); white-space: normal; }
+.stock-table .salt-ions b { color: var(--ink); font-weight: 600; }
+
+/* 等比换算行 */
+.water-scale { display: flex; align-items: center; gap: 8px; margin: 9px 0;
+  padding: 7px 10px; background: #faf6f0; border-radius: 8px; flex-wrap: wrap; }
+.water-scale input { width: 120px; padding: 4px 8px; font-size: 12.5px; }
+
+/* 成品组成指标条 */
+.water-result-strip { display: grid; grid-template-columns: repeat(9, 1fr); gap: 6px;
+  padding: 9px 6px; background: #f8f4ee; border-radius: 9px; margin-bottom: 8px; }
+.water-result-strip .wstat { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.water-result-strip .stat-v { font-size: 14.5px; }
+.water-result-strip .wstat.over .stat-v { color: var(--bad); }
+.water-result-strip .wstat.unit .stat-v { font-size: 12.5px; }
+
+.water-deviation { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.dev-pill { font-size: 11.5px; border-radius: 999px; padding: 2px 10px;
+  border: 1px solid var(--line); background: #fff; }
+.dev-pill.ok { background: #e8f2ea; border-color: #bfdcc5; color: var(--ok); }
+.dev-pill.off { background: var(--bad-bg); border-color: #f0c1ba; color: var(--bad); font-weight: 600; }
+
+.water-conflicts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.water-conflicts .wc-item { border-radius: 8px; padding: 6px 10px; font-size: 12px;
+  border: 1px solid transparent; }
+.water-conflicts .wc-item.error { background: var(--bad-bg); border-color: #f0c1ba; }
+.water-conflicts .wc-item.warning { background: var(--warn-bg); border-color: #ecd3a3; }
+.water-conflicts .wc-item.info { background: var(--info-bg); border-color: #b9d6e0; }
+.water-conflicts .wc-head { font-weight: 700; }
+.water-conflicts .wc-item.error .wc-head { color: var(--bad); }
+.water-conflicts .wc-item.warning .wc-head { color: var(--warn); }
+.water-conflicts .wc-item.info .wc-head { color: var(--info); }
+.water-conflicts .wc-adjust { display: block; margin-top: 2px; color: var(--ink-soft); }
+.water-conflicts .wc-empty { color: var(--ok); font-size: 12.5px; font-weight: 600; }
+
+/* 对照：水配方并排 */
+.water-compare { margin-top: 10px; border-top: 1px dashed #e0d4c6; padding-top: 8px; }
+.water-compare-title { font-size: 12.5px; font-weight: 700; color: var(--brand-dark); margin-bottom: 5px; }
+.wc-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.wc-table th, .wc-table td { padding: 3px 6px; border-bottom: 1px dashed #ece3d8;
+  font-variant-numeric: tabular-nums; text-align: right; }
+.wc-table th:first-child, .wc-table td:first-child { text-align: left; color: var(--ink-soft); }
+.wc-table thead th { color: var(--brand-dark); }
+.wc-table td.diff-up { color: var(--bad); font-weight: 600; }
+.wc-table td.diff-down { color: var(--info); font-weight: 600; }
+.wc-table tr.wc-section td { background: #faf5ee; font-weight: 700; color: var(--brand-dark); text-align: left; }
+
+.water-print { font-size: 11px; }
+.water-print .wp-line { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 3px; }
+.water-print .wp-line b { color: var(--brand-dark); }
+
 /* ============ 版本列表 ============ */
 .version-list { list-style: none; margin: 0; padding: 0; display: flex;
   flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
@@ -331,6 +416,7 @@ textarea { width: 100%; resize: vertical; }
 .ver-name { font-size: 12.5px; font-weight: 600; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
 .ver-meta { font-size: 11px; color: var(--ink-soft); }
+.ver-water { font-size: 10.5px; color: #2b5d6d; margin-top: 1px; }
 .ver-v { background: var(--brand); color: #fff; border-radius: 999px;
   padding: 0 7px; font-size: 10.5px; margin-right: 5px; }
 .ver-del { border: none; background: none; color: #c2a094; cursor: pointer; font-size: 14px; }
@@ -371,6 +457,8 @@ textarea { width: 100%; resize: vertical; }
   .col-side { position: static; }
   .param-grid { grid-template-columns: repeat(2, 1fr); }
   .stat-strip { grid-template-columns: repeat(3, 1fr); row-gap: 10px; }
+  .water-grid { grid-template-columns: 1fr; }
+  .water-result-strip { grid-template-columns: repeat(5, 1fr); row-gap: 8px; }
 }
 
 /* ============ 打印（A4 单页） ============ */
@@ -440,6 +528,15 @@ textarea { width: 100%; resize: vertical; }
   #versionsCard .card-title .btn { display: none; }
   .suggest-box { display: block !important; margin-top: 6px; }
   #versionsCard { display: none !important; }
+
+  /* 水配方打印：隐藏编辑器控件，展示静态摘要 */
+  #waterCard .water-toolbar, #waterCard .water-scale,
+  #waterCard .stock-table .stock-edit, #waterCard .water-conflicts { display: none !important; }
+  #waterCard fieldset.water-box input { width: 70px; }
+  .water-print { display: block; }
+  .water-grid { gap: 5px; }
+  .water-box { padding: 4px 7px; }
+  .water-result-strip { padding: 4px; }
 
   textarea { border: 1px solid #ccc5ba; font-size: 10px; }
 }

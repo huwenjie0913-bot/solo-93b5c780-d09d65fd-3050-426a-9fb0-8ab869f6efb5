@@ -170,9 +170,10 @@ function markDirty(dirty = true) {
 async function init() {
   bindUI();
   try {
-    const [{ brews }, meta] = await Promise.all([
+    const [{ brews }, meta, recipesData] = await Promise.all([
       api("GET", "/api/brews"),
       api("GET", "/api/thresholds"),
+      api("GET", "/api/water/recipes").catch(() => ({ recipes: [] })),
     ]);
     state.brews = brews;
     state.thresholds = meta.thresholds;
@@ -181,6 +182,8 @@ async function init() {
     buildFlavorChecks();
     buildLockChecks();
     fillBrewSelectors();
+    await WaterModule.init();
+    WaterModule.refreshRecipes(recipesData.recipes);
     if (brews.length) {
       const full = await api("GET", `/api/brews/${brews[0].id}`);
       loadBrew(full.brew, { resetCompare: true });
@@ -237,6 +240,9 @@ function loadBrew(brew, opts = {}) {
   renderVersions();
   markDirty(false);
   scheduleDiagnosis();
+  if (typeof WaterModule !== "undefined") {
+    WaterModule.onBrewLoaded(state.current);
+  }
 }
 
 /* ---------------- 参数表单 ---------------- */
@@ -959,6 +965,18 @@ function renderCompareDiff() {
     line.appendChild(htmlEl("span", "dl-v", `${vb} → ${va}`));
     box.appendChild(line);
   });
+  renderWaterCompare();
+}
+
+/* 两杯并排水配方差异（WaterModule 提供） */
+function renderWaterCompare() {
+  if (typeof WaterModule === "undefined") return;
+  if (state.current && state.compareBrew) {
+    WaterModule.renderCompare(state.current, state.compareBrew);
+  } else {
+    const box = document.getElementById("waterCompare");
+    if (box) box.hidden = true;
+  }
 }
 
 async function generateSuggestion() {
@@ -1022,6 +1040,10 @@ function renderVersions() {
     main.appendChild(name);
     main.appendChild(htmlEl("div", "ver-meta",
       `${b.brew_date} · ${fmt(b.dose, 0)}g粉 / ${fmt(b.water, 0)}g水 · ${fmt(b.temp, 0)}℃`));
+    if (b.water_recipe_id) {
+      const wm = htmlEl("div", "ver-water", "💧 已关联水配方");
+      main.appendChild(wm);
+    }
     main.addEventListener("click", () => switchBrew(b.id));
     li.appendChild(main);
 
@@ -1079,6 +1101,7 @@ async function saveCurrent() {
     flavors: b.flavors,
     notes: b.notes,
     nodes: sanitizeNodes(b.nodes),
+    water_recipe_id: b.water_recipe_id ?? null,
   };
   try {
     const data = await api("PUT", `/api/brews/${b.id}`, payload);
@@ -1141,6 +1164,7 @@ function newBrew() {
     dose: 15, water: 225, temp: 92, grind: 22, target_ratio: 15,
     flavors: [],
     notes: "",
+    water_recipe_id: null,
     nodes: [
       { t: 0, w: 0 },
       { t: 25, w: 35 },
@@ -1158,6 +1182,7 @@ function newBrew() {
   state.diagnosis = null;
   fillForm();
   renderAll();
+  if (typeof WaterModule !== "undefined") WaterModule.onBrewLoaded(state.current);
   $("fName").focus();
   markDirty(true);
   $("saveBtn").textContent = "保存为新记录";
@@ -1202,6 +1227,10 @@ async function resetSamples() {
   try {
     const data = await api("POST", "/api/samples/reset", {});
     state.brews = (await api("GET", "/api/brews")).brews;
+    if (typeof WaterModule !== "undefined") {
+      const rd = await api("GET", "/api/water/recipes");
+      WaterModule.refreshRecipes(rd.recipes);
+    }
     fillBrewSelectors();
     if (data.brews.length) {
       const full = await api("GET", `/api/brews/${data.brews[0].id}`);
@@ -1285,6 +1314,7 @@ function bindUI() {
       state.compareBrew = null;
       renderChart();
       renderCompareDiff();
+      renderWaterCompare();
       return;
     }
     try {
@@ -1293,6 +1323,7 @@ function bindUI() {
       state.compareBrew = full.brew;
       renderChart();
       renderCompareDiff();
+      renderWaterCompare();
     } catch (err) {
       toast(err.message);
     }
@@ -1303,6 +1334,7 @@ function bindUI() {
     $("compareSelect").value = "";
     renderChart();
     renderCompareDiff();
+    renderWaterCompare();
   });
   $("suggestBtn").addEventListener("click", generateSuggestion);
   $("newVersionBtn").addEventListener("click", saveAsNewVersion);
@@ -1326,3 +1358,29 @@ function bindUI() {
 }
 
 document.addEventListener("DOMContentLoaded", init);
+
+/* ---------------- 供 water.js 调用的接口 ---------------- */
+
+window.App = {
+  currentBrewId() {
+    return state.current ? state.current.id : null;
+  },
+  getCurrentBrew() {
+    return state.current;
+  },
+  async updateBrewField(field, value) {
+    if (!state.current || state.current.id == null) return;
+    const data = await api("PUT", `/api/brews/${state.current.id}`, { [field]: value });
+    state.current = { ...state.current, ...data.brew };
+    const idx = state.brews.findIndex((x) => x.id === state.current.id);
+    if (idx >= 0) state.brews[idx] = { ...state.brews[idx], ...data.brew };
+    fillBrewSelectors();
+    renderVersions();
+  },
+  async unlinkWaterFromCurrent() {
+    if (state.current && state.current.id != null && state.current.water_recipe_id != null) {
+      await this.updateBrewField("water_recipe_id", null);
+    }
+    if (state.current) state.current.water_recipe_id = null;
+  },
+};

@@ -14,6 +14,7 @@ from urllib.parse import urlparse, parse_qs
 
 import store
 import diagnostics
+import water
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
@@ -86,6 +87,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/brews":
                 self._send_json({"brews": store.list_brews()})
+            elif path == "/api/water/meta":
+                self._send_json(water.meta())
+            elif path == "/api/water/recipes":
+                self._send_json({"recipes": store.list_water_recipes()})
+            elif path.startswith("/api/water/recipes/"):
+                self._handle_water_recipe_get(path)
             elif path == "/api/thresholds":
                 self._send_json({"thresholds": diagnostics.THRESHOLDS,
                                  "flavor_labels": diagnostics.FLAVOR_LABELS,
@@ -111,6 +118,30 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 brew = store.create_brew(data)
                 self._send_json({"brew": brew}, 201)
+            elif path == "/api/water/calculate":
+                params = data.get("params")
+                if not isinstance(params, dict):
+                    self._send_error(400, "缺少 params（配方参数）对象")
+                    return
+                self._send_json({"result": water.calculate_recipe(params)})
+            elif path == "/api/water/scale":
+                result = data.get("result")
+                try:
+                    new_volume = float(data.get("volume_ml"))
+                except (TypeError, ValueError):
+                    self._send_error(400, "缺少合法的 volume_ml")
+                    return
+                if not isinstance(result, dict):
+                    self._send_error(400, "缺少 result（已算好的配方结果）对象")
+                    return
+                self._send_json({"result": water.scale_volume(result, new_volume)})
+            elif path == "/api/water/recipes":
+                errors = _validate_recipe(data)
+                if errors:
+                    self._send_error(400, "；".join(errors))
+                    return
+                recipe = store.create_water_recipe(data)
+                self._send_json({"recipe": recipe}, 201)
             elif path == "/api/samples/reset":
                 brews = store.reset_samples()
                 self._send_json({"brews": brews})
@@ -144,6 +175,18 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         try:
             data = self._read_json()
+            recipe_id = _water_recipe_id_from_path(parsed.path)
+            if recipe_id is not None:
+                if store.get_water_recipe(recipe_id) is None:
+                    self._send_error(404, "水配方不存在")
+                    return
+                errors = _validate_recipe(data, partial=True)
+                if errors:
+                    self._send_error(400, "；".join(errors))
+                    return
+                recipe = store.update_water_recipe(recipe_id, data)
+                self._send_json({"recipe": recipe})
+                return
             brew_id = _brew_id_from_path(parsed.path)
             if brew_id is None:
                 self._send_error(404, "未知接口")
@@ -164,6 +207,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         parsed = urlparse(self.path)
+        recipe_id = _water_recipe_id_from_path(parsed.path)
+        if recipe_id is not None:
+            if store.delete_water_recipe(recipe_id):
+                self._send_json({"ok": True})
+            else:
+                self._send_error(404, "水配方不存在")
+            return
         brew_id = _brew_id_from_path(parsed.path)
         if brew_id is None:
             self._send_error(404, "未知接口")
@@ -188,6 +238,17 @@ class Handler(BaseHTTPRequestHandler):
             payload["diagnosis"] = diagnostics.analyze(brew)
         self._send_json(payload)
 
+    def _handle_water_recipe_get(self, path):
+        recipe_id = _water_recipe_id_from_path(path)
+        if recipe_id is None:
+            self._send_error(404, "未知接口")
+            return
+        recipe = store.get_water_recipe(recipe_id)
+        if recipe is None:
+            self._send_error(404, "水配方不存在")
+            return
+        self._send_json({"recipe": recipe})
+
     def log_message(self, fmt, *args):
         # 简洁日志
         print("%s - %s" % (self.address_string(), fmt % args))
@@ -202,6 +263,40 @@ def _brew_id_from_path(path):
         except ValueError:
             return None
     return None
+
+
+def _water_recipe_id_from_path(path):
+    parts = [p for p in path.split("/") if p]
+    # /api/water/recipes/<id>
+    if len(parts) >= 4 and parts[:3] == ["api", "water", "recipes"]:
+        try:
+            return int(parts[3])
+        except ValueError:
+            return None
+    return None
+
+
+def _validate_recipe(data, partial=False):
+    errors = []
+    if not partial and not data.get("name"):
+        errors.append("缺少水配方名称")
+    spec = data.get("spec")
+    if spec is not None:
+        if not isinstance(spec, dict):
+            errors.append("spec 必须是对象")
+        else:
+            try:
+                vol = float(spec.get("volume_ml", 0))
+                if vol <= 0:
+                    errors.append("成品体积必须大于 0")
+            except (TypeError, ValueError):
+                errors.append("成品体积必须是数字")
+            for section in ("source", "target"):
+                if section in spec and not isinstance(spec[section], dict):
+                    errors.append(f"{section} 必须是对象")
+    if "result" in data and not isinstance(data["result"], dict):
+        errors.append("result 必须是对象")
+    return errors
 
 
 def _validate(data, partial=False):

@@ -96,6 +96,99 @@
       </div>
     </div>
 
+    <!-- 冲煮水配方 -->
+    <div class="card" id="waterCard">
+      <div class="card-title">
+        <h2>💧 冲煮水配方</h2>
+        <span class="muted small" id="waterLinkTag">未关联冲煮</span>
+      </div>
+
+      <!-- 工具行：名称 / 已保存配方选择 / 保存 / 关联 -->
+      <div class="water-toolbar no-print">
+        <input type="text" id="wfName" class="wf-name" placeholder="水配方名称，例如：钙主导水 1L">
+        <select id="wfSavedSelect" title="载入已保存的水配方"></select>
+        <button class="btn mini" id="wfSaveBtn" type="button">保存配方</button>
+        <button class="btn mini" id="wfLinkBtn" type="button" title="把当前配方关联到这杯冲煮">关联到本杯</button>
+        <button class="btn mini danger" id="wfDelBtn" type="button" title="删除当前载入的已保存配方">删除</button>
+      </div>
+
+      <div class="water-grid">
+        <!-- 原水 -->
+        <fieldset class="water-box">
+          <legend>原水 / 底水（mg/L）</legend>
+          <label>Ca²⁺ <input type="number" id="wsCa" min="0" step="0.1"></label>
+          <label>Mg²⁺ <input type="number" id="wsMg" min="0" step="0.1"></label>
+          <label>Na⁺ <input type="number" id="wsNa" min="0" step="0.1"></label>
+          <label>碱度 HCO₃⁻ <input type="number" id="wsHco3" min="0" step="0.1"></label>
+        </fieldset>
+
+        <!-- 目标水 -->
+        <fieldset class="water-box target">
+          <legend>目标水（mg/L）</legend>
+          <label>Ca²⁺ <input type="number" id="wtCa" min="0" step="0.1"></label>
+          <label>Mg²⁺ <input type="number" id="wtMg" min="0" step="0.1"></label>
+          <label>碱度 HCO₃⁻ <input type="number" id="wtHco3" min="0" step="0.1"></label>
+          <label class="water-volume">成品体积
+            <span>
+              <input type="number" id="wfVolume" min="1" step="10"> mL
+            </span>
+          </label>
+        </fieldset>
+
+        <!-- 自定上限 / 量具 -->
+        <fieldset class="water-box limits">
+          <legend>自定上限与量具</legend>
+          <label>Cl⁻ 上限 <input type="number" id="wlCl" min="0" step="1"> mg/L</label>
+          <label>SO₄²⁻ 上限 <input type="number" id="wlSo4" min="0" step="1"> mg/L</label>
+          <label>量具分辨率 <input type="number" id="wlRes" min="0" step="0.01"> mL</label>
+          <small class="hint">上限填 0 表示不限制</small>
+        </fieldset>
+      </div>
+
+      <!-- 储备液表 -->
+      <div class="table-wrap">
+        <table class="stock-table" id="stockTable">
+          <thead>
+            <tr>
+              <th>选用</th><th>盐</th><th>分子式</th><th>储备液浓度 (g/L)</th>
+              <th>称取 (mg)</th><th>储备液添加 (mL)</th><th>带入离子 (mg/L)</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <!-- 等比换算 -->
+      <div class="water-scale no-print">
+        <span class="flavor-label">按新体积等比换算：</span>
+        <input type="number" id="wfScaleVol" min="1" step="10" placeholder="新体积 mL">
+        <button class="btn mini" id="wfScaleApply" type="button">换算并替换</button>
+        <span class="muted small" id="wfScaleHint"></span>
+      </div>
+
+      <!-- 成品组成 -->
+      <div class="water-result-strip">
+        <div class="wstat"><span class="stat-k">Ca²⁺</span><span class="stat-v" id="wrCa">–</span></div>
+        <div class="wstat"><span class="stat-k">Mg²⁺</span><span class="stat-v" id="wrMg">–</span></div>
+        <div class="wstat"><span class="stat-k">Na⁺</span><span class="stat-v" id="wrNa">–</span></div>
+        <div class="wstat" id="wrKBox" hidden><span class="stat-k">K⁺</span><span class="stat-v" id="wrK">–</span></div>
+        <div class="wstat"><span class="stat-k">Cl⁻</span><span class="stat-v" id="wrCl">–</span></div>
+        <div class="wstat"><span class="stat-k">SO₄²⁻</span><span class="stat-v" id="wrSo4">–</span></div>
+        <div class="wstat"><span class="stat-k">碱度</span><span class="stat-v" id="wrHco3">–</span></div>
+        <div class="wstat"><span class="stat-k">总硬度</span><span class="stat-v" id="wrGH">–</span></div>
+        <div class="wstat"><span class="stat-k">储备液合计</span><span class="stat-v" id="wrAdd">–</span></div>
+      </div>
+
+      <!-- 目标偏差 -->
+      <div class="water-deviation" id="waterDeviation"></div>
+
+      <!-- 冲突与提示 -->
+      <ul class="water-conflicts" id="waterConflicts"></ul>
+
+      <!-- 打印用静态摘要（屏幕上隐藏） -->
+      <div class="water-print print-only" id="waterPrint"></div>
+    </div>
+
     <!-- 曲线图 -->
     <div class="card">
       <div class="card-title">
@@ -183,6 +276,12 @@
         <button class="btn mini" id="clearCompareBtn" type="button">清除叠加</button>
       </div>
       <div class="compare-diff" id="compareDiff"></div>
+      <div class="water-compare" id="waterCompare" hidden>
+        <div class="water-compare-title">💧 水配方差异（并排）</div>
+        <div class="table-wrap">
+          <table class="wc-table" id="waterCompareTable"></table>
+        </div>
+      </div>
       <div class="lock-box">
         <span class="flavor-label">锁定变量（下一杯不动）：</span>
         <div class="lock-checks" id="lockChecks"></div>
@@ -205,5 +304,6 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="app.js"></script>
+<script src="water.js"></script>
 </body>
 </html>

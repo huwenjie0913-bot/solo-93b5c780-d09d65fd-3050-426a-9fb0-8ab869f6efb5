@@ -326,6 +326,7 @@ def calculate_recipe(params):
 
     result = {
         "volume_ml": round(volume_ml, 1),
+        "resolution_ml": round(resolution_ml, 3),
         "final": {k: round(v, 2) for k, v in final.items()},
         "hardness": {
             "as_caco3": round(gh_caco3, 1),
@@ -378,17 +379,27 @@ def _split_ca_mg(n_ca, n_mg, avail, cl_cap, so4_cap, allow_ca, allow_mg):
     else:
         return None, False
 
-    c_half = (cl_cap / M["cl"] / 1000.0) / 2.0 if cl_cap is not None else 1e18
-    s_mol = so4_cap / M["so4"] / 1000.0 if so4_cap is not None else 1e18
+    # Cl 约束（mol/L）：2(x+v) ≤ cap；SO4 约束：(nCa-x)+(nMg-v) ≤ cap
+    # 单边上限（另一边未设置）时，缺失的界用 ±∞ 表示而不是有限哨兵值
+    inf = math.inf
+    c_half = (cl_cap / M["cl"] / 1000.0) / 2.0 if cl_cap is not None else inf
+    s_mol = so4_cap / M["so4"] / 1000.0 if so4_cap is not None else inf
 
     total = n_ca + n_mg
-    z_low = max(xl + vl, total - s_mol)     # x+v 下界（SO4 约束）
-    z_high = min(xh + vh, c_half)           # x+v 上界（Cl 约束）
+    # x+v 下界：自身盐种取值域下界、SO4 约束下界
+    z_low = max(xl + vl, total - s_mol)
+    # x+v 上界：自身盐种取值域上界、Cl 约束上界
+    z_high = min(xh + vh, c_half)
     if z_low > z_high + 1e-12:
         return None, True
 
-    x = min(xh, c_half - vl)                # CaCl2 尽量多
-    v = max(vl, total - s_mol - x)          # MgCl2 尽量少
+    # 在可行域内选偏好点：CaCl2 尽量多（x 大）、MgCl2 尽量少（v 小）
+    x = min(xh, c_half - vl) if c_half < inf else xh
+    v = max(vl, total - s_mol - x) if s_mol < inf else vl
+    # 保证 x+v 不越过 Cl 上界（x 已含一层保护，这里兜底）
+    if c_half < inf:
+        v = min(v, max(vl, c_half - x))
+        x = min(x, max(xl, c_half - v))
     # 数值清洁
     x = max(0.0, min(n_ca, x))
     v = max(0.0, min(n_mg, v))
@@ -399,80 +410,194 @@ def _split_ca_mg(n_ca, n_mg, avail, cl_cap, so4_cap, allow_ca, allow_mg):
 
 
 def _cap_conflict(n_ca, n_mg, need_ca, need_mg, avail, cl_cap, so4_cap):
-    """构造 Cl/SO4 上限不可达冲突，给出具体可调目标。"""
-    total = n_ca + n_mg
-    s_mol = so4_cap / M["so4"] / 1000.0 if so4_cap is not None else None
-    c_half = (cl_cap / M["cl"] / 1000.0) / 2.0 if cl_cap is not None else None
+    """构造 Cl/SO4 上限不可达冲突，给出具体、有限、与实际约束一致的建议。
 
-    # 被禁用盐逼出来的"不可避免"量
-    forced_cl = (n_ca if not avail["caso4"] else 0.0) \
+    只有被设置（非 None）的上限才参与"最低必伴量"计算与提示；未设置的一侧
+    视为无约束，不得拿哨兵数字（如 1e18）进入用户可见文案。
+    """
+    total = n_ca + n_mg
+    c_half = (cl_cap / M["cl"] / 1000.0) / 2.0 if cl_cap is not None else None
+    s_mol = so4_cap / M["so4"] / 1000.0 if so4_cap is not None else None
+
+    # --- 在现有可用盐种下，各阴离子"无法转走"的最低必伴量（mol/L 二价阳离子）---
+    # 只能走氯盐的 Ca（没启用 CaSO4）/ Mg（没启用 MgSO4）
+    forced_cl_mol = (n_ca if not avail["caso4"] else 0.0) \
         + (n_mg if not avail["mgso4"] else 0.0)
-    forced_so = (n_ca if not avail["cacl2"] else 0.0) \
+    # 只能走硫酸盐的 Ca（没启用 CaCl2）/ Mg（没启用 MgCl2）
+    forced_so_mol = (n_ca if not avail["cacl2"] else 0.0) \
         + (n_mg if not avail["mgcl2"] else 0.0)
 
-    cl_need_mol = 2.0 * max(forced_cl, total - (s_mol if s_mol is not None else -1e18))
-    so_need_mol = max(forced_so, total - (c_half if c_half is not None else -1e18))
-    cl_need_mg = cl_need_mol * M["cl"] * 1000.0
-    so_need_mg = so_need_mol * M["so4"] * 1000.0
+    # 本侧实际必须承担的二价阳离子量 = 总需求 − 对侧（受其上限约束）最多能分担的量，
+    # 且不少于"只能走本侧"的强制量。未设限一侧不分担约束。
+    if c_half is not None:
+        so_capacity = s_mol if s_mol is not None else math.inf  # SO4 侧能容纳多少二价阳离子
+        cl_bearing = max(forced_cl_mol, total - so_capacity)
+        cl_min_mg = 2.0 * cl_bearing * M["cl"] * 1000.0
+    else:
+        cl_bearing, cl_min_mg = None, None
+    if s_mol is not None:
+        cl_capacity = 2.0 * c_half if c_half is not None else math.inf
+        so_bearing = max(forced_so_mol, total - cl_capacity)
+        so_min_mg = so_bearing * M["so4"] * 1000.0
+    else:
+        so_bearing, so_min_mg = None, None
 
     over = []
-    if cl_cap is not None and cl_need_mg > cl_cap + EPS:
-        over.append(("cl", cl_need_mg, cl_cap))
-    if so4_cap is not None and so_need_mg > so4_cap + EPS:
-        over.append(("so4", so_need_mg, so4_cap))
+    if cl_cap is not None and cl_min_mg > cl_cap + EPS:
+        over.append(("cl", cl_min_mg, cl_cap, cl_bearing))
+    if so4_cap is not None and so_min_mg > so4_cap + EPS:
+        over.append(("so4", so_min_mg, so4_cap, so_bearing))
 
     over_txt = "、".join(
-        f"{ION_LABELS[k]}至少约 {v:.0f} mg/L（上限 {cap:g}）" for k, v, cap in over)
+        f"{ION_LABELS[k]}至少约 {v:.1f} mg/L（上限 {cap:g}）" for k, v, cap, _b in over)
+    both_caps = cl_cap is not None and so4_cap is not None
+    uncapped_txt = ("；SO₄²⁻ 未设上限" if cl_cap is not None and so4_cap is None
+                    else "；Cl⁻ 未设上限" if so4_cap is not None and cl_cap is None else "")
     message = (
         f"目标不可达：需补充 Ca²⁺ {need_ca:g} mg/L、Mg²⁺ {need_mg:g} mg/L"
         f"（合计 {total * 1000:.2f} mmol/L 二价阳离子），每 1 mmol Ca/Mg 必伴随"
-        f" 2 mmol Cl⁻ 或 1 mmol SO₄²⁻。最优分配下{over_txt}。"
+        f" 2 mmol Cl⁻ 或 1 mmol SO₄²⁻。最优分配下{over_txt}{uncapped_txt}。"
     )
 
     adjusts = []
-    for k, v, _cap in over:
-        if k == "cl":
-            adjusts.append(f"把 Cl⁻ 上限放宽到 ≥ {math.ceil(v)} mg/L")
-        else:
-            adjusts.append(f"把 SO₄²⁻ 上限放宽到 ≥ {math.ceil(v)} mg/L")
-    # 需削减的二价阳离子量
-    bound = (c_half if c_half is not None else 0.0) \
-        + (s_mol if s_mol is not None else 0.0)
-    shortfall = max(0.0, total - bound)
-    if shortfall > EPS:
-        adjusts.append(
-            f"或降低 Ca/Mg 目标：合计少补至少 {shortfall * 1000:.2f} mmol/L"
-            f"（约相当于 Ca²⁺ {shortfall * M['ca'] * 1000:.0f} mg/L"
-            f"或 Mg²⁺ {shortfall * M['mg'] * 1000:.0f} mg/L）")
-    if not avail["caso4"]:
-        adjusts.append("启用 CaSO₄·2H₂O 可把部分钙需求的伴随离子从 Cl⁻ 转为 SO₄²⁻")
-    if not avail["mgcl2"]:
-        adjusts.append("启用 MgCl₂·6H₂O 可把部分镁需求的伴随离子从 SO₄²⁻ 转为 Cl⁻")
+    # 1) 超限侧：放宽到有限的最低值
+    for k, v, _cap, _b in over:
+        name = "Cl⁻" if k == "cl" else "SO₄²⁻"
+        adjusts.append(f"把 {name} 上限放宽到 ≥ {math.ceil(v)} mg/L")
+
+    # 2) 启用能把需求转到未超限一侧的盐（仅当该侧确实还有容量或未设限）
+    over_keys = {k for k, *_ in over}
+    if "cl" in over_keys and not avail["caso4"]:
+        if so4_cap is None:
+            adjusts.append("启用 CaSO₄·2H₂O，把钙需求的伴随离子从 Cl⁻ 转到（未设限的）SO₄²⁻")
+        elif "so4" not in over_keys:
+            adjusts.append("启用 CaSO₄·2H₂O，把钙需求的伴随离子从 Cl⁻ 转为 SO₄²⁻")
+    if "so4" in over_keys and not avail["mgcl2"] and avail["mgso4"]:
+        if cl_cap is None:
+            adjusts.append("启用 MgCl₂·6H₂O，把镁需求的伴随离子从 SO₄²⁻ 转到（未设限的）Cl⁻")
+        elif "cl" not in over_keys:
+            adjusts.append("启用 MgCl₂·6H₂O，把镁需求的伴随离子从 SO₄²⁻ 转为 Cl⁻")
+
+    # 3) 只能走超限侧的 Ca/Mg（对应替用盐未启用）：给出有限的目标削减量
+    forced_detail = {
+        "cl": [
+            (n_ca, not avail["caso4"], "Ca²⁺", M["ca"]),
+            (n_mg, not avail["mgso4"], "Mg²⁺", M["mg"]),
+        ],
+        "so4": [
+            (n_ca, not avail["cacl2"], "Ca²⁺", M["ca"]),
+            (n_mg, not avail["mgcl2"], "Mg²⁺", M["mg"]),
+        ],
+    }
+    for k, _v, _cap, bearing in over:
+        parts = []
+        forced_total = 0.0
+        for mol, stuck, ion_name, mw in forced_detail[k]:
+            if stuck and mol > EPS:
+                forced_total += mol
+                parts.append(f"{ion_name} {mol * mw * 1000:.0f} mg/L")
+        if parts and bearing >= forced_total - EPS:
+            anion = "Cl⁻" if k == "cl" else "SO₄²⁻"
+            adjusts.append(
+                f"或在不启用替用盐的情况下，把只能配成{anion}伴随盐的目标"
+                f"（{'、'.join(parts)}）相应降低")
+
+    # 4) 两侧都设限且都超：转盐已无法完全解决，给出总削减量
+    if both_caps and len(over) == 2:
+        shortfall = max(0.0, total - 2.0 * c_half - s_mol)
+        if shortfall > EPS:
+            adjusts.append(
+                f"或同时降低 Ca/Mg 目标合计 ≥ {shortfall * 1000:.2f} mmol/L"
+                f"（约 Ca²⁺ {shortfall * M['ca'] * 1000:.0f} mg/L "
+                f"或 Mg²⁺ {shortfall * M['mg'] * 1000:.0f} mg/L）")
+
+    limits_out = {}
+    if cl_min_mg is not None:
+        limits_out["cl_min_mg_l"] = round(cl_min_mg, 1)
+    if so_min_mg is not None:
+        limits_out["so4_min_mg_l"] = round(so_min_mg, 1)
+
     return {
         "level": "error", "code": "anion_cap_exceeded",
         "message": message,
-        "adjust": "；".join(adjusts) + "。",
-        "limits": {
-            "cl_min_mg_l": round(cl_need_mg, 1),
-            "so4_min_mg_l": round(so_need_mg, 1),
-        },
+        "adjust": "；".join(dict.fromkeys(adjusts)) + "。",
+        "limits": limits_out,
     }
 
 
 # ---------------------------------------------------------------- 等比换算
 
-def scale_volume(result, new_volume_ml):
-    """把已算好的配方结果等比换算到新体积（浓度组成不变，仅添加体积/称取量缩放）。"""
+def scale_volume(result, new_volume_ml, spec=None):
+    """把配方换算到新体积：浓度组成不变，仅添加体积/称取量等比缩放。
+
+    量具分辨率、储备液体积占比等冲突依赖于体积，必须按新剂量重新判定，
+    不能沿用旧结果——因此：
+    - 传入 spec 时直接以新体积重新反算（权威路径）；
+    - 只有旧快照（无 spec）时才对结果做比例缩放，并重建体积相关冲突。
+    """
     if new_volume_ml <= 0:
         raise ValueError("新体积必须大于 0 mL")
-    factor = new_volume_ml / result["volume_ml"]
+    if spec is not None:
+        spec = json_safe(spec)
+        spec["volume_ml"] = new_volume_ml
+        return calculate_recipe(spec)
+
+    return _rescale_snapshot(result, new_volume_ml)
+
+
+# 与成品体积无关（只取决于浓度/盐种）的冲突类型，缩放体积后原样保留
+_VOLUME_INVARIANT_CODES = frozenset({
+    "target_below_source", "anion_cap_exceeded", "no_salt_available",
+    "negative_input", "stock_conc_missing",
+})
+
+
+def _rescale_snapshot(result, new_volume_ml):
+    old_volume = float(result["volume_ml"])
+    factor = new_volume_ml / old_volume
     scaled = json_safe(result)
     scaled["volume_ml"] = round(new_volume_ml, 1)
-    scaled["total_add_ml"] = round(result["total_add_ml"] * factor, 3)
+
+    resolution_ml = float(result.get("resolution_ml") or 0)
+
+    total_add_ml = 0.0
     for d in scaled["doses"]:
         d["salt_mg"] = round(d["salt_mg"] * factor, 1)
-        if d["add_ml"] is not None:
+        if d.get("add_ml") is not None:
             d["add_ml"] = round(d["add_ml"] * factor, 3)
+            total_add_ml += d["add_ml"]
+        # below_resolution 按新剂量重新判定
+        below = (d.get("add_ml") is not None and resolution_ml > 0
+                 and d["add_ml"] < resolution_ml - EPS)
+        d["below_resolution"] = below
+    scaled["total_add_ml"] = round(total_add_ml, 3)
+
+    # 重建冲突：保留浓度不变的错误/警告，重新生成体积相关项
+    kept = [c for c in scaled.get("conflicts", [])
+            if c.get("code") in _VOLUME_INVARIANT_CODES]
+    rebuilt = list(kept)
+
+    for d in scaled["doses"]:
+        if d.get("below_resolution"):
+            rebuilt.append({
+                "level": "warning", "code": "below_resolution",
+                "message": f"{d['formula']} 储备液只需加 {d['add_ml']:.3f} mL，"
+                           f"低于量具分辨率 {resolution_ml:g} mL，实际无法准确量取。",
+                "adjust": f"可把该储备液进一步稀释（添加量即升至约 {resolution_ml:g} mL），"
+                          f"或把成品体积加大；也可直接用 0.001g 天平称取 {d['salt_mg']:.1f} mg 固体盐。",
+            })
+
+    if new_volume_ml > 0 and total_add_ml / new_volume_ml > 0.02:
+        rebuilt.append({
+            "level": "info", "code": "volume_displacement",
+            "message": f"储备液合计加入 {total_add_ml:.1f} mL，占成品体积 "
+                       f"{total_add_ml / new_volume_ml * 100:.1f}%。",
+            "adjust": "家庭配制通常忽略这点体积位移；若要精确，可先加 "
+                      f"{new_volume_ml - total_add_ml:.0f} mL 原水/纯水再补储备液至总体积。",
+        })
+
+    scaled["conflicts"] = rebuilt
+    scaled["feasible"] = not any(c["level"] == "error" for c in rebuilt)
     return scaled
 
 

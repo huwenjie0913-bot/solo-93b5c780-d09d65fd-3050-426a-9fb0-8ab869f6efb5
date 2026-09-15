@@ -126,15 +126,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"result": water.calculate_recipe(params)})
             elif path == "/api/water/scale":
                 result = data.get("result")
+                spec = data.get("params")
                 try:
                     new_volume = float(data.get("volume_ml"))
                 except (TypeError, ValueError):
                     self._send_error(400, "缺少合法的 volume_ml")
                     return
-                if not isinstance(result, dict):
-                    self._send_error(400, "缺少 result（已算好的配方结果）对象")
+                if spec is not None and not isinstance(spec, dict):
+                    self._send_error(400, "params 必须是配方参数对象")
                     return
-                self._send_json({"result": water.scale_volume(result, new_volume)})
+                if spec is None and not isinstance(result, dict):
+                    self._send_error(400, "缺少 params 或 result 对象")
+                    return
+                self._send_json({"result": water.scale_volume(
+                    result if spec is None else None, new_volume, spec)})
             elif path == "/api/water/recipes":
                 errors = _validate_recipe(data)
                 if errors:

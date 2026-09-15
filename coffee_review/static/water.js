@@ -444,19 +444,25 @@ const WaterModule = (() => {
       toast("计算尚未完成，请稍候");
       return;
     }
-    // 先确保最新编辑已算完（防抖可能还没返回），直接用后端换算接口
+    // 优先用当前参数按新体积重新反算（below_resolution、体积占比等冲突随之重算）；
+    // 后端在缺 params 时才退化为对旧结果做比例换算
     try {
+      const payload = { volume_ml: newVol };
+      const spec = collectSpec();
+      if (spec) {
+        payload.params = spec;
+      } else {
+        payload.result = state.result;
+      }
+      const data = await api("POST", "/api/water/scale", payload);
       const factor = newVol / state.result.volume_ml;
-      const data = await api("POST", "/api/water/scale", {
-        result: state.result, volume_ml: newVol,
-      });
       state.result = data.result;
       state.editor.volume_ml = newVol;
       $("wfVolume").value = newVol;
       renderResult();
       markDirty(true);
       $("wfScaleHint").textContent =
-        `已换算到 ${newVol} mL：浓度不变，添加量 ×${fmt(factor, 3)}`;
+        `已换算到 ${newVol} mL：浓度不变，添加量 ×${fmt(factor, 3)}，剂量冲突已按新体积重算`;
       setTimeout(() => { $("wfScaleHint").textContent = ""; }, 4000);
     } catch (err) {
       toast(err.message);
